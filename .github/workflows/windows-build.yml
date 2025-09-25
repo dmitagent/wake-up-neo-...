@@ -3,8 +3,7 @@ name: Build Windows EXE
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build_windows:
@@ -13,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Setup Flutter
+      - name: Setup Flutter SDK
         uses: subosito/flutter-action@v2
         with:
           flutter-version: 'stable'
@@ -21,7 +20,7 @@ jobs:
       - name: Enable Windows desktop
         run: flutter config --enable-windows-desktop
 
-      - name: Initialize Flutter project for Windows
+      - name: Init Windows support
         run: flutter create . --platforms=windows
 
       - name: Get dependencies
