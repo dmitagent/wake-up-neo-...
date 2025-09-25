@@ -1,0 +1,22 @@
+trigger:
+  - main
+
+pool:
+  vmImage: 'windows-latest'
+
+steps:
+  - checkout: self
+    clean: true
+
+  - script: |
+      choco install flutter -y
+      flutter config --enable-windows-desktop
+      flutter pub get
+      flutter create . --platforms=windows
+      flutter build windows --release
+    displayName: 'Install & build Flutter Windows'
+
+  - task: PublishPipelineArtifact@1
+    inputs:
+      targetPath: 'build/windows/runner/Release'
+      artifactName: 'matrix-app-windows'
