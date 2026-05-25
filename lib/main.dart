@@ -1,290 +1,380 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
-import 'package:video_player/video_player.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:just_audio/just_audio.dart';
 
-void main() => runApp(MatrixApp());
+void main() => runApp(const MatrixApp());
 
-class MatrixApp extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      home: Builder(
-        builder: (BuildContext context) {
-          return Scaffold(body: MatrixScreen());
-        },
-      ),
-      debugShowCheckedModeBanner: false,
-    );
-  }
-}
-
-class MatrixScreen extends StatefulWidget {
-  @override
-  _MatrixScreenState createState() => _MatrixScreenState();
-}
-
-class _MatrixScreenState extends State<MatrixScreen> {
-  final double fontSize = 12.0;
-  final int streamLength = 20; // Max length of a visible falling stream
-  final String letters = 'アァイィウヴエカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン';
-  final Random random = Random();
-
-  List<List<String>>? streams;
-  List<int>? positions; // Represents the 'head' row index for each stream
-  String currentMessage = '';
-  int messageIndex = 0;
-  int charIndex = 0;
-  Timer? _timer;
-  Timer? _typingTimer;
-  final List<String> messages = <String>[
+// ============================================================================
+// 🎨 КОНФИГУРАЦИЯ (вынесено для гибкости)
+// ============================================================================
+class MatrixConfig {
+  static const double fontSize = 12.0;
+  static const int streamLength = 20;
+  static const int animationFps = 60; // Целевая частота кадров
+  static const Duration messageDelay = Duration(seconds: 7);
+  static const Duration typingInterval = Duration(milliseconds: 150);
+  static const String letters = 'アァイィウヴエカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン';
+  
+  // Аудио
+  static const double backgroundVolume = 0.3;
+  static const double typingVolume = 0.7;
+  static const String backgroundAudioUrl = 
+      'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3';
+  static const String typingAudioUrl = 
+      'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3';
+  
+  static const List<String> messages = [
     'Wake up, Neo...',
     'The Matrix has you...',
     'Follow the white rabbit.',
   ];
+}
 
-  // Audio controllers
-  VideoPlayerController? _backgroundAudioController;
-  VideoPlayerController? _typingAudioController;
+// ============================================================================
+// 🚀 ПРИЛОЖЕНИЕ
+// ============================================================================
+class MatrixApp extends StatelessWidget {
+  const MatrixApp({super.key});
 
-  // Placeholder URLs for audio files. In a real application, you would host your own.
-  // Using SoundHelix.com examples for demonstration purposes.
-  final String _backgroundAudioUrl =
-      'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3'; // An ambient-like track
-  final String _typingAudioUrl =
-      'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3'; // A shorter track for typing effect
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Wake up, Neo...',
+      home: const MatrixScreen(),
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData.dark(useMaterial3: false),
+    );
+  }
+}
+
+// ============================================================================
+// 🖥️ ЭКРАН: Управление состоянием и логикой
+// ============================================================================
+class MatrixScreen extends StatefulWidget {
+  const MatrixScreen({super.key});
+
+  @override
+  State<MatrixScreen> createState() => _MatrixScreenState();
+}
+
+class _MatrixScreenState extends State<MatrixScreen> with TickerProviderStateMixin {
+  // Данные анимации
+  List<List<int>>? _streams; // ✅ Храним коды символов (int), а не String
+  List<int>? _positions;
+  
+  // Сообщения
+  String _currentMessage = '';
+  int _messageIndex = 0;
+  int _charIndex = 0;
+  
+  // Анимация
+  Ticker? _animationTicker;
+  Timer? _typingTimer;
+  
+  // Аудио (just_audio)
+  AudioPlayer? _backgroundAudio;
+  AudioPlayer? _typingAudio;
+  
+  // Кэш для отрисовки (ключ: "char#colorValue")
+  final Map<String, ui.TextPainter> _textPainterCache = {};
+  
+  // Цвета для градиента потока
+  static const Color _headColor = Colors.greenAccent;
+  static const Color _tailBaseColor = Color.fromARGB(255, 0, 180, 0);
 
   @override
   void initState() {
     super.initState();
+    // Инициализация после первого фрейма, когда известен размер экрана
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeMatrixData();
-      _initializeAudio(); // Initialize audio after matrix data is set up
-      _timer = Timer.periodic(const Duration(milliseconds: 50), (_) {
-        if (!mounted) return;
-        setState(() {
-          updateStreams();
-        });
-      });
-      Future<void>.delayed(const Duration(seconds: 7), typeNextMessage);
+      _initializeAudio();
+      _startAnimation();
+      Future<void>.delayed(MatrixConfig.messageDelay, _typeNextMessage);
     });
   }
 
+  // --------------------------------------------------------------------------
+  // 🔧 Инициализация данных матрицы
+  // --------------------------------------------------------------------------
   void _initializeMatrixData() {
-    final double screenWidth = MediaQuery.of(context).size.width;
-    final int columns = (screenWidth / fontSize).floor();
+    final screenWidth = MediaQuery.of(context).size.width;
+    final columns = (screenWidth / MatrixConfig.fontSize).floor();
+    
     setState(() {
-      streams = List<List<String>>.generate(columns, (_) => <String>[]);
-      // Initialize positions with negative values to make streams appear to flow in from above
-      positions = List<int>.generate(
+      _streams = List<List<int>>.generate(columns, (_) => <int>[]);
+      _positions = List<int>.generate(
         columns,
-        (_) => -random.nextInt(streamLength * 2),
+        (_) => -Random().nextInt(MatrixConfig.streamLength * 2),
       );
     });
   }
 
-  /// Initializes and configures the audio players.
+  // --------------------------------------------------------------------------
+  // 🔊 Инициализация аудио (just_audio)
+  // --------------------------------------------------------------------------
   Future<void> _initializeAudio() async {
-    _backgroundAudioController = VideoPlayerController.networkUrl(
-      Uri.parse(_backgroundAudioUrl),
-    );
-    _typingAudioController = VideoPlayerController.networkUrl(
-      Uri.parse(_typingAudioUrl),
-    );
-
     try {
-      // Initialize both controllers concurrently
-      await Future.wait<void>(<Future<void>>[
-        _backgroundAudioController!.initialize(),
-        _typingAudioController!.initialize(),
-      ]);
+      // Фоновая музыка
+      _backgroundAudio = AudioPlayer();
+      await _backgroundAudio?.setAudioSource(
+        AudioSource.uri(Uri.parse(MatrixConfig.backgroundAudioUrl)),
+      );
+      _backgroundAudio?.setLoopMode(LoopMode.one);
+      _backgroundAudio?.setVolume(MatrixConfig.backgroundVolume);
+      await _backgroundAudio?.play();
 
-      if (mounted) {
-        // Configure and play background audio
-        _backgroundAudioController!.setLooping(true);
-        _backgroundAudioController!.setVolume(
-          0.3,
-        ); // Set a lower volume for background ambience
-        _backgroundAudioController!.play();
-
-        // Configure typing audio (don't play yet)
-        _typingAudioController!.setVolume(
-          0.7,
-        ); // Typing sound should be more noticeable
-        _typingAudioController!.pause(); // Ensure it's paused initially
-      }
+      // Звук печати (короткий клик)
+      _typingAudio = AudioPlayer();
+      await _typingAudio?.setAudioSource(
+        AudioSource.uri(Uri.parse(MatrixConfig.typingAudioUrl)),
+      );
+      _typingAudio?.setVolume(MatrixConfig.typingVolume);
+      
+    } on PlayerException catch (e) {
+      debugPrint('❌ Audio error: ${e.message}');
+      // Фолбэк: продолжаем без звука
     } catch (e) {
-      // Log any errors during audio initialization
-      // In a production app, you might display an error to the user or retry.
-      print('Error initializing audio: $e');
+      debugPrint('❌ Unexpected audio error: $e');
     }
   }
 
-  void typeNextMessage() {
+  // --------------------------------------------------------------------------
+  // 🎬 Анимация через Ticker (синхронизация с дисплеем)
+  // --------------------------------------------------------------------------
+  void _startAnimation() {
+    _animationTicker = createTicker(_onAnimationTick)..start();
+  }
+
+  void _onAnimationTick(Duration elapsed) {
+    if (!mounted) return;
+    setState(_updateStreams);
+  }
+
+  // --------------------------------------------------------------------------
+  // 🔄 Логика обновления потоков
+  // --------------------------------------------------------------------------
+  void _updateStreams() {
+    if (_streams == null || _positions == null) return;
+    
+    final screenHeight = MediaQuery.of(context).size.height;
+    final random = Random();
+    
+    for (int i = 0; i < _streams!.length; i++) {
+      // Добавляем новый символ в начало (код символа, а не строку)
+      _streams![i].insert(0, MatrixConfig.letters.codeUnitAt(
+        random.nextInt(MatrixConfig.letters.length)
+      ));
+      
+      // Обрезаем хвост
+      if (_streams![i].length > MatrixConfig.streamLength) {
+        _streams![i].removeLast();
+      }
+
+      // Сдвигаем поток вниз
+      _positions![i] += 1;
+
+      // Если поток полностью ушёл за экран — сбрасываем его вверх
+      final tailRowIndex = _positions![i] - (_streams![i].length - 1);
+      if (tailRowIndex * MatrixConfig.fontSize > screenHeight) {
+        _positions![i] = -(MatrixConfig.streamLength + 
+            random.nextInt(MatrixConfig.streamLength ~/ 2));
+      }
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // ⌨️ Эффект печатания текста
+  // --------------------------------------------------------------------------
+  void _typeNextMessage() {
     if (!mounted) return;
 
-    currentMessage = '';
-    charIndex = 0;
-    final String fullText = messages[messageIndex];
-    _typingTimer = Timer.periodic(const Duration(milliseconds: 150), (
-      Timer timer,
-    ) {
+    _currentMessage = '';
+    _charIndex = 0;
+    final fullText = MatrixConfig.messages[_messageIndex];
+    
+    _typingTimer = Timer.periodic(MatrixConfig.typingInterval, (timer) {
       if (!mounted) {
         timer.cancel();
         return;
       }
-      if (charIndex < fullText.length) {
+      
+      if (_charIndex < fullText.length) {
         setState(() {
-          currentMessage += fullText[charIndex];
-          charIndex++;
+          _currentMessage += fullText[_charIndex];
+          _charIndex++;
         });
-        // Play typing sound for each character
-        if (_typingAudioController != null &&
-            _typingAudioController!.value.isInitialized) {
-          // Seek to start and play to simulate a distinct 'click' sound for each character.
-          // Note: If the actual audio file is long, this will cut it off and restart.
-          // For true 'typing' effect with multiple short sounds, a dedicated audio pooling library might be better.
-          _typingAudioController!.seekTo(Duration.zero);
-          _typingAudioController!.play();
-        }
+        _playTypingSound();
       } else {
         timer.cancel();
-        // Pause typing sound once the message is complete
-        _typingAudioController?.pause();
+        _typingAudio?.pause();
+        
+        // Пауза перед следующим сообщением
         Future<void>.delayed(const Duration(seconds: 2), () {
           if (!mounted) return;
-          setState(() {
-            currentMessage = '';
-          });
-          messageIndex++;
-          if (messageIndex < messages.length) {
-            Future<void>.delayed(const Duration(seconds: 1), typeNextMessage);
-          } else {
-            messageIndex = 0; // Loop messages
-            Future<void>.delayed(const Duration(seconds: 1), typeNextMessage);
-          }
+          setState(() => _currentMessage = '');
+          _messageIndex = (_messageIndex + 1) % MatrixConfig.messages.length;
+          Future<void>.delayed(const Duration(seconds: 1), _typeNextMessage);
         });
       }
     });
   }
 
-  void updateStreams() {
-    if (streams == null || positions == null) {
-      return;
-    }
-
-    final double screenHeight = MediaQuery.of(context).size.height;
-
-    for (int i = 0; i < streams!.length; i++) {
-      streams![i].insert(0, letters[random.nextInt(letters.length)]);
-      if (streams![i].length > streamLength) {
-        streams![i].removeLast();
-      }
-
-      positions![i] += 1; // Move stream down by one row
-
-      // Calculate the y-coordinate of the last character in the stream.
-      // If this character has moved completely off-screen (below the bottom edge),
-      // reset the stream's position to start above the top edge, ensuring continuity.
-      final int tailCharRowIndex = positions![i] - (streams![i].length - 1);
-      if (tailCharRowIndex * fontSize > screenHeight) {
-        // Reset the head's position to be above the screen.
-        // Start it with a negative offset related to its length, plus some randomness
-        // to prevent all streams from starting at the exact same 'y' coordinate.
-        positions![i] = -(streamLength + random.nextInt(streamLength ~/ 2));
-      }
+  void _playTypingSound() {
+    if (_typingAudio != null) {
+      // Перематываем и воспроизводим для эффекта "клика"
+      _typingAudio?.seek(Duration.zero);
+      _typingAudio?.play();
     }
   }
 
+  // --------------------------------------------------------------------------
+  // 🎨 Кэширование TextPainter (ключевая оптимизация!)
+  // --------------------------------------------------------------------------
+  ui.TextPainter _getCachedPainter(int charCode, Color color) {
+    final char = String.fromCharCode(charCode);
+    final key = '$char#${color.value}';
+    
+    return _textPainterCache.putIfAbsent(key, () {
+      return ui.TextPainter(
+        text: ui.TextSpan(
+          text: char,
+          style: TextStyle(
+            color: color,
+            fontSize: MatrixConfig.fontSize,
+            fontFamily: 'monospace',
+          ),
+        ),
+        textDirection: ui.TextDirection.ltr,
+      )..layout();
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  // 🖼️ Отрисовка
+  // --------------------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
-    if (streams == null || positions == null) {
-      return Container(color: Colors.black);
+    if (_streams == null || _positions == null) {
+      return const Scaffold(body: ColoredBox(color: Colors.black));
     }
 
     return Container(
       color: Colors.black,
       child: CustomPaint(
-        painter: MatrixPainter(streams!, positions!, fontSize, currentMessage),
-        child: Container(),
+        painter: MatrixPainter(
+          streams: _streams!,
+          positions: _positions!,
+          fontSize: MatrixConfig.fontSize,
+          message: _currentMessage,
+          getCachedPainter: _getCachedPainter, // ✅ Передаём кэш-функцию
+        ),
+        child: const SizedBox.expand(),
       ),
     );
   }
 
+  // --------------------------------------------------------------------------
+  // 🧹 Очистка ресурсов
+  // --------------------------------------------------------------------------
   @override
   void dispose() {
-    _timer?.cancel();
+    _animationTicker?.dispose();
     _typingTimer?.cancel();
-    _backgroundAudioController
-        ?.dispose(); // Dispose background audio controller
-    _typingAudioController?.dispose(); // Dispose typing audio controller
+    
+    _backgroundAudio?.dispose();
+    _typingAudio?.dispose();
+    
+    _textPainterCache.values.forEach((tp) => tp.dispose());
+    
     super.dispose();
   }
 }
 
+// ============================================================================
+// 🖌️ PAINTER: Отрисовка на Canvas
+// ============================================================================
 class MatrixPainter extends CustomPainter {
-  final List<List<String>> streams;
+  final List<List<int>> streams;
   final List<int> positions;
   final double fontSize;
   final String message;
+  final ui.TextPainter Function(int, Color) getCachedPainter;
 
-  MatrixPainter(this.streams, this.positions, this.fontSize, this.message);
+  const MatrixPainter({
+    required this.streams,
+    required this.positions,
+    required this.fontSize,
+    required this.message,
+    required this.getCachedPainter,
+  });
 
   @override
-  void paint(Canvas canvas, Size size) {
-    // This creates a subtle fade-out effect for previous frames, giving the impression of movement.
-    final Paint fadePaint = Paint()
+  void paint(ui.Canvas canvas, ui.Size size) {
+    // Эффект затухания предыдущего кадра (шлейф)
+    final fadePaint = Paint()
       ..color = Colors.black.withAlpha((255 * 0.05).round());
     canvas.drawRect(Offset.zero & size, fadePaint);
 
+    // Отрисовка потоков
     for (int i = 0; i < streams.length; i++) {
       for (int j = 0; j < streams[i].length; j++) {
-        // Calculate y-position: 'positions[i]' is the head, 'j' is the offset from the head.
-        final double y = (positions[i] - j) * fontSize;
-
-        // Skip drawing characters far off-screen for performance
+        final y = (positions[i] - j) * fontSize;
+        
+        // Пропускаем невидимые символы (оптимизация)
         if (y < -fontSize || y > size.height) continue;
 
-        final String char = streams[i][j];
-        // Color changes to create a fading trail effect: head is bright, tail fades to darker green.
-        final Color color = j == 0
-            ? Colors
-                  .greenAccent // Head of the stream is bright green
+        final charCode = streams[i][j];
+        
+        // Градиент: голова яркая, хвост тускнеет
+        final color = j == 0 
+            ? Colors.greenAccent 
             : Color.fromARGB(
                 255,
                 0,
                 (180 - j * 8).clamp(0, 255),
                 0,
-              ); // Fades to darker green
-        final TextStyle textStyle = TextStyle(
-          color: color,
-          fontSize: fontSize,
-          fontFamily: 'monospace',
-        );
-        final TextPainter tp = TextPainter(
-          text: TextSpan(text: char, style: textStyle),
-          textDirection: TextDirection.ltr,
-        )..layout();
-        tp.paint(canvas, Offset(i * fontSize, y));
+              );
+        
+        // ✅ Используем кэшированный TextPainter
+        final painter = getCachedPainter(charCode, color);
+        painter.paint(canvas, Offset(i * fontSize, y));
       }
     }
 
+    // Центральное сообщение
     if (message.isNotEmpty) {
-      final TextStyle centerStyle = TextStyle(
-        color: Colors.greenAccent,
-        fontSize: 28,
-        fontWeight: FontWeight.bold,
-        fontFamily: 'monospace',
-      );
-      final TextPainter tp = TextPainter(
-        text: TextSpan(text: message, style: centerStyle),
+      final messagePainter = ui.TextPainter(
+        text: ui.TextSpan(
+          text: message,
+          style: const TextStyle(
+            color: Colors.greenAccent,
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            fontFamily: 'monospace',
+          ),
+        ),
         textAlign: TextAlign.center,
-        textDirection: TextDirection.ltr,
+        textDirection: ui.TextDirection.ltr,
       )..layout(maxWidth: size.width);
-      tp.paint(canvas, Offset((size.width - tp.width) / 2, size.height / 2));
+      
+      messagePainter.paint(
+        canvas, 
+        Offset((size.width - messagePainter.width) / 2, size.height / 2),
+      );
+      messagePainter.dispose(); // ✅ Освобождаем ресурс
     }
   }
 
   @override
-  bool shouldRepaint(covariant MatrixPainter oldDelegate) => true;
+  // ✅ Перерисовываем только при изменении данных
+  bool shouldRepaint(covariant MatrixPainter old) {
+    return !listEquals(old.streams, streams) ||
+           !listEquals(old.positions, positions) ||
+           old.message != message;
+  }
 }
