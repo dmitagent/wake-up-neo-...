@@ -1,22 +1,100 @@
 trigger:
   - main
+  # ✅ Добавляем теги для версионирования
+  - refs/tags/v*
 
 pool:
   vmImage: 'windows-latest'
 
+# ✅ Переменные для удобства и версионирования
+variables:
+  flutter_version: '3.19.0'  # ✅ Фиксируем версию для стабильности
+  build_configuration: 'Release'
+  app_name: 'matrix-app'
+
 steps:
   - checkout: self
     clean: true
+    # ✅ Глубина клонирования для получения тегов (нужно для версионирования)
+    fetchDepth: 0
 
+  # ✅ Кэширование зависимостей Flutter (ускоряет сборку на 30-50%)
+  - task: Cache@2
+    inputs:
+      key: 'flutter | "$(Agent.OS)" | pubspec.yaml | "**/pubspec.lock"'
+      restoreKeys: |
+        flutter | "$(Agent.OS)"
+        flutter
+      path: $(Flutter.InstallationDirectory)/.pub-cache
+    displayName: 'Cache Flutter dependencies'
+
+  # ✅ Установка конкретной версии Flutter (через чоклати с версией или вручную)
   - script: |
-      choco install flutter -y
+      choco install flutter --version=3.19.0 -y
+      flutter --version
       flutter config --enable-windows-desktop
-      flutter pub get
-      flutter create . --platforms=windows
-      flutter build windows --release
-    displayName: 'Install & build Flutter Windows'
+      flutter doctor -v
+    displayName: 'Install Flutter $(flutter_version)'
 
+  # ✅ Получение зависимостей
+  - script: |
+      flutter pub get
+    displayName: 'Get Flutter dependencies'
+
+  # ✅ (Опционально) Запуск тестов перед сборкой
+  - script: |
+      flutter test --coverage
+    displayName: 'Run Flutter tests'
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+  # ✅ Безопасная подготовка Windows-платформы
+  - script: |
+      if not exist "windows\CMakeLists.txt" (
+        echo "⚠️ Windows platform not found, creating..."
+        flutter create . --platforms=windows
+      ) else (
+        echo "✅ Windows platform already exists"
+      )
+    displayName: 'Ensure Windows platform'
+
+  # ✅ Сборка с версионированием
+  - script: |
+      # Извлекаем версию из тега или используем номер сборки
+      $version = "$(Build.SourceBranchName)"
+      if ($version -match "^v\d+\.\d+\.\d+$") {
+        $version = $version.TrimStart('v')
+      } else {
+        $version = "$(Build.BuildNumber)"
+      }
+      echo "📦 Building version: $version"
+      
+      # (Опционально) Обновляем версию в pubspec.yaml через sed/powershell
+      # powershell -Command "(Get-Content pubspec.yaml) -replace 'version: .*', 'version: $version' | Set-Content pubspec.yaml"
+      
+      flutter build windows --release --dart-define=APP_VERSION=$version
+    displayName: 'Build Windows Release'
+
+  # ✅ Публикация артефакта с версией в имени
   - task: PublishPipelineArtifact@1
     inputs:
       targetPath: 'build/windows/runner/Release'
-      artifactName: 'matrix-app-windows'
+      artifactName: '$(app_name)-windows-$(Build.BuildNumber)'
+      publishLocation: 'pipeline'
+    displayName: 'Publish Windows artifact'
+
+  # ✅ (Опционально) Создание ZIP-архива для удобства скачивания
+  - task: ArchiveFiles@2
+    inputs:
+      rootFolderOrFile: 'build/windows/runner/Release'
+      includeRootFolder: false
+      archiveType: 'zip'
+      archiveFile: '$(Build.ArtifactStagingDirectory)/$(app_name)-windows-$(Build.BuildNumber).zip'
+    displayName: 'Create ZIP archive'
+
+  # ✅ Публикация ZIP как отдельного артефакта
+  - task: PublishPipelineArtifact@1
+    inputs:
+      targetPath: '$(Build.ArtifactStagingDirectory)/$(app_name)-windows-$(Build.BuildNumber).zip'
+      artifactName: '$(app_name)-windows-zip-$(Build.BuildNumber)'
+      publishLocation: 'pipeline'
+    displayName: 'Publish ZIP artifact'
