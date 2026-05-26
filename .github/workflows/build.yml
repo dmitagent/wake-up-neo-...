@@ -6,15 +6,15 @@ on:
 
 jobs:
   build-windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup Flutter
-        uses: subosito/flutter-action@v3  # ✅ v3
+        uses: subosito/flutter-action@v3
         with:
-          flutter-version: '3.24.0'       # ✅ свежее
+          flutter-version: '3.24.0'
           channel: 'stable'
           cache: true
 
@@ -31,4 +31,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: matrix-app-windows
-          path: build/windows/x64/runner/Release/  # ✅ правильный путь для Flutter 3.10+
+          path: build/windows/x64/runner/Release/
