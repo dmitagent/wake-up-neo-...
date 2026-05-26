@@ -1,8 +1,21 @@
+name: wake_up_neo
+description: Matrix and Nostalgia
+
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
 dependencies:
   flutter:
     sdk: flutter
-  just_audio: ^0.9.36  # ✅ Вместо video_player для аудио
-  # video_player: ^2.8.2  # ❌ Убираем
 
 dev_dependencies:
-  flutter_lints: ^3.0.1  # ✅ Для линтинга (опционально)
+  flutter:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
