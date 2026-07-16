@@ -196,7 +196,7 @@ class _MatrixScreenState extends State<MatrixScreen>
     final char = String.fromCharCode(charCode);
     final key = '$char#${color.value}';
     return _textPainterCache.putIfAbsent(key, () {
-      return ui.TextPainter(
+      return TextPainter(
         text: TextSpan(
           text: char,
           style: TextStyle(
@@ -206,7 +206,7 @@ class _MatrixScreenState extends State<MatrixScreen>
             fontWeight: FontWeight.bold,
           ),
         ),
-        textDirection: ui.TextDirection.ltr,
+        textDirection: TextDirection.ltr,
       )..layout();
     });
   }
@@ -304,7 +304,7 @@ class MatrixPainter extends CustomPainter {
           ),
         ),
         textAlign: TextAlign.left,
-        textDirection: ui.TextDirection.ltr,
+        textDirection: TextDirection.ltr,
       )..layout(maxWidth: size.width - 40);
 
       messagePainter.paint(
