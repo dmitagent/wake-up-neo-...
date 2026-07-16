@@ -7,9 +7,9 @@ on:
     branches: [ main, master ]
 
 jobs:
-  build:
+  # 1. Сборка для Android и Web на Linux
+  build-mobile-and-web:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -24,6 +24,10 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+
+      # Генерируем недостающие файлы конфигурации для Web и Android
+      - name: Configure Web and Android platforms
+        run: flutter create . --platforms web,android
 
       - name: Install dependencies
         run: flutter pub get
@@ -45,3 +49,42 @@ jobs:
         with:
           name: web-build
           path: build/web
+
+  # 2. Сборка для Windows на машине Windows
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Enable Windows Desktop Build
+        run: flutter config --enable-windows-desktop
+
+      # Генерируем недостающие файлы конфигурации для Windows
+      - name: Configure Windows platform
+        run: flutter create . --platforms windows
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Windows Application
+        run: flutter build windows --release
+
+      # Архивируем всю папку сборки Windows, так как сам .exe зависит от dll в этой же папке
+      - name: Archive Windows Release
+        uses: thedoctor0/zip-release@0.7.5
+        with:
+          type: 'zip'
+          filename: 'matrix-windows-x64.zip'
+          directory: 'build/windows/x64/runner/Release'
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: build/windows/x64/runner/Release/matrix-windows-x64.zip
