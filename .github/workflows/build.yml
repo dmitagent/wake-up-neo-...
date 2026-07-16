@@ -24,17 +24,18 @@ jobs:
         with:
           channel: 'stable'
 
-      # Конфигурируем платформы
-      - name: Configure Web and Android platforms
+      # Создаем настройки для веб-платформы заново, чтобы гарантировать наличие всех файлов
+      - name: Configure Platforms
         run: flutter create . --platforms web,android
 
       - name: Install dependencies
         run: flutter pub get
 
-      # Собираем Web с флагом html, чтобы избежать любых ошибок рендеринга
+      # Чистая сборка Web без лишних флагов
       - name: Build Web
-        run: flutter build web --web-renderer html --release
+        run: flutter build web --release
 
+      # Сборка Android APK
       - name: Build Android APK
         run: flutter build apk --release
 
