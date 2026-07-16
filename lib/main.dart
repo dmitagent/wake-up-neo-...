@@ -2,24 +2,25 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart'; // ✅ listEquals
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:just_audio/just_audio.dart';
 
 void main() => runApp(const MatrixApp());
 
 class MatrixConfig {
-  static const double fontSize = 12.0;
+  static const double fontSize = 14.0;
   static const int streamLength = 20;
-  static const Duration messageDelay = Duration(seconds: 7);
-  static const Duration typingInterval = Duration(milliseconds: 150);
+  static const Duration messageDelay = Duration(seconds: 3);
+  static const Duration typingInterval = Duration(milliseconds: 110);
   static const String letters =
-      'アァイィウヴエカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン';
+      'アァイィウヴエカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
   static const List<String> messages = [
     'Wake up, Neo...',
     'The Matrix has you...',
     'Follow the white rabbit.',
+    'Knock, knock, Neo.',
   ];
 }
 
@@ -47,40 +48,64 @@ class MatrixScreen extends StatefulWidget {
 class _MatrixScreenState extends State<MatrixScreen>
     with TickerProviderStateMixin {
   List<List<int>>? _streams;
-  List<int>? _positions;
+  List<double>? _positions;
+  List<double>? _speeds;
 
   String _currentMessage = '';
   int _messageIndex = 0;
   int _charIndex = 0;
+  bool _showCursor = true;
 
   Ticker? _animationTicker;
   Timer? _typingTimer;
+  Timer? _cursorTimer;
+  Duration _lastElapsed = Duration.zero;
 
-  // ✅ Throttle: обновляем логику не чаще ~30 раз/сек
-  Duration _lastUpdate = Duration.zero;
-  static const Duration _updateInterval =
-      Duration(milliseconds: 33); // ~30 FPS
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  bool _isAudioInitialized = false;
 
   final Map<String, ui.TextPainter> _textPainterCache = {};
 
   @override
   void initState() {
     super.initState();
+    _initAudio();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeMatrixData();
       _startAnimation();
+      _startCursorBlinking();
       Future<void>.delayed(MatrixConfig.messageDelay, _typeNextMessage);
     });
+  }
+
+  Future<void> _initAudio() async {
+    try {
+      await _audioPlayer.setAsset('assets/typing.mp3');
+      await _audioPlayer.setLoopMode(LoopMode.one);
+      _isAudioInitialized = true;
+    } catch (e) {
+      debugPrint("Не удалось запустить аудио: $e. Приложение продолжит работу без звука.");
+    }
   }
 
   void _initializeMatrixData() {
     final screenWidth = MediaQuery.of(context).size.width;
     final columns = (screenWidth / MatrixConfig.fontSize).floor();
+    final random = Random();
+
     setState(() {
-      _streams = List<List<int>>.generate(columns, (_) => <int>[]);
-      _positions = List<int>.generate(
+      _streams = List<List<int>>.generate(columns, (_) {
+        return List<int>.generate(MatrixConfig.streamLength, (_) {
+          return MatrixConfig.letters.codeUnitAt(random.nextInt(MatrixConfig.letters.length));
+        });
+      });
+      _positions = List<double>.generate(
         columns,
-        (_) => -Random().nextInt(MatrixConfig.streamLength * 2),
+        (_) => -random.nextInt(MatrixConfig.streamLength * 3).toDouble(),
+      );
+      _speeds = List<double>.generate(
+        columns,
+        (_) => 0.15 + random.nextDouble() * 0.25,
       );
     });
   }
@@ -89,37 +114,45 @@ class _MatrixScreenState extends State<MatrixScreen>
     _animationTicker = createTicker(_onAnimationTick)..start();
   }
 
-  void _onAnimationTick(Duration elapsed) {
-    if (!mounted) return;
-    // ✅ Throttle — не каждый кадр
-    if (elapsed - _lastUpdate < _updateInterval) return;
-    _lastUpdate = elapsed;
-    setState(_updateStreams);
+  void _startCursorBlinking() {
+    _cursorTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
+      if (mounted) {
+        setState(() {
+          _showCursor = !_showCursor;
+        });
+      }
+    });
   }
 
-  void _updateStreams() {
-    if (_streams == null || _positions == null) return;
+  void _onAnimationTick(Duration elapsed) {
+    if (!mounted) return;
+    
+    final double dt = (elapsed.inMilliseconds - _lastElapsed.inMilliseconds) / 16.0; 
+    _lastElapsed = elapsed;
+
+    if (_streams == null || _positions == null || _speeds == null) return;
+
     final screenHeight = MediaQuery.of(context).size.height;
     final random = Random();
 
-    for (int i = 0; i < _streams!.length; i++) {
-      _streams![i].insert(
-        0,
-        MatrixConfig.letters
-            .codeUnitAt(random.nextInt(MatrixConfig.letters.length)),
-      );
-      if (_streams![i].length > MatrixConfig.streamLength) {
-        _streams![i].removeLast();
-      }
-      _positions![i] += 1;
+    for (int i = 0; i < _positions!.length; i++) {
+      _positions![i] += _speeds![i] * dt;
 
-      final tailY = (_positions![i] - (_streams![i].length - 1)) *
-          MatrixConfig.fontSize;
+      if (random.nextDouble() < 0.05) {
+        final changeIdx = random.nextInt(MatrixConfig.streamLength);
+        _streams![i][changeIdx] = MatrixConfig.letters.codeUnitAt(
+          random.nextInt(MatrixConfig.letters.length),
+        );
+      }
+
+      final tailY = (_positions![i] - MatrixConfig.streamLength) * MatrixConfig.fontSize;
       if (tailY > screenHeight) {
-        _positions![i] = -(MatrixConfig.streamLength +
-            random.nextInt(MatrixConfig.streamLength ~/ 2));
+        _positions![i] = -random.nextInt(MatrixConfig.streamLength).toDouble();
+        _speeds![i] = 0.15 + random.nextDouble() * 0.25;
       }
     }
+
+    setState(() {});
   }
 
   void _typeNextMessage() {
@@ -127,6 +160,10 @@ class _MatrixScreenState extends State<MatrixScreen>
     _currentMessage = '';
     _charIndex = 0;
     final fullText = MatrixConfig.messages[_messageIndex];
+
+    if (_isAudioInitialized) {
+      _audioPlayer.play();
+    }
 
     _typingTimer = Timer.periodic(MatrixConfig.typingInterval, (timer) {
       if (!mounted) {
@@ -140,13 +177,16 @@ class _MatrixScreenState extends State<MatrixScreen>
         });
       } else {
         timer.cancel();
-        Future<void>.delayed(const Duration(seconds: 2), () {
+        
+        if (_isAudioInitialized) {
+          _audioPlayer.pause();
+        }
+
+        Future<void>.delayed(const Duration(seconds: 3), () {
           if (!mounted) return;
           setState(() => _currentMessage = '');
-          _messageIndex =
-              (_messageIndex + 1) % MatrixConfig.messages.length;
-          Future<void>.delayed(
-              const Duration(seconds: 1), _typeNextMessage);
+          _messageIndex = (_messageIndex + 1) % MatrixConfig.messages.length;
+          Future<void>.delayed(const Duration(seconds: 1), _typeNextMessage);
         });
       }
     });
@@ -163,6 +203,7 @@ class _MatrixScreenState extends State<MatrixScreen>
             color: color,
             fontSize: MatrixConfig.fontSize,
             fontFamily: 'monospace',
+            fontWeight: FontWeight.bold,
           ),
         ),
         textDirection: ui.TextDirection.ltr,
@@ -175,14 +216,15 @@ class _MatrixScreenState extends State<MatrixScreen>
     if (_streams == null || _positions == null) {
       return const Scaffold(body: ColoredBox(color: Colors.black));
     }
-    return Container(
-      color: Colors.black,
-      child: CustomPaint(
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: CustomPaint(
         painter: MatrixPainter(
           streams: _streams!,
           positions: _positions!,
           fontSize: MatrixConfig.fontSize,
           message: _currentMessage,
+          showCursor: _showCursor,
           getCachedPainter: _getCachedPainter,
         ),
         child: const SizedBox.expand(),
@@ -194,6 +236,8 @@ class _MatrixScreenState extends State<MatrixScreen>
   void dispose() {
     _animationTicker?.dispose();
     _typingTimer?.cancel();
+    _cursorTimer?.cancel();
+    _audioPlayer.dispose();
     for (final tp in _textPainterCache.values) {
       tp.dispose();
     }
@@ -203,9 +247,10 @@ class _MatrixScreenState extends State<MatrixScreen>
 
 class MatrixPainter extends CustomPainter {
   final List<List<int>> streams;
-  final List<int> positions;
+  final List<double> positions;
   final double fontSize;
   final String message;
+  final bool showCursor;
   final ui.TextPainter Function(int, Color) getCachedPainter;
 
   const MatrixPainter({
@@ -213,57 +258,66 @@ class MatrixPainter extends CustomPainter {
     required this.positions,
     required this.fontSize,
     required this.message,
+    required this.showCursor,
     required this.getCachedPainter,
   });
 
   @override
   void paint(ui.Canvas canvas, ui.Size size) {
-    final fadePaint = Paint()
-      ..color = Colors.black.withAlpha((255 * 0.05).round());
-    canvas.drawRect(Offset.zero & size, fadePaint);
-
     for (int i = 0; i < streams.length; i++) {
-      for (int j = 0; j < streams[i].length; j++) {
-        final y = (positions[i] - j) * fontSize;
-        if (y < -fontSize || y > size.height) continue;
+      final double headPosition = positions[i];
+      final List<int> stream = streams[i];
 
-        final color = j == 0
-            ? Colors.greenAccent
-            : Color.fromARGB(255, 0, (180 - j * 8).clamp(0, 255), 0);
+      for (int j = 0; j < stream.length; j++) {
+        final double y = (headPosition - j) * fontSize;
+        if (y < -fontSize || y > size.height + fontSize) continue;
 
-        final painter = getCachedPainter(streams[i][j], color);
+        Color color;
+        if (j == 0) {
+          color = const Color(0xFFE0F7FA); 
+        } else {
+          final double opacity = (1.0 - (j / stream.length)).clamp(0.0, 1.0);
+          color = Colors.green.withOpacity(opacity);
+        }
+
+        final painter = getCachedPainter(stream[j], color);
         painter.paint(canvas, Offset(i * fontSize, y));
       }
     }
 
     if (message.isNotEmpty) {
+      final displayText = showCursor ? '$message█' : message;
       final messagePainter = ui.TextPainter(
         text: ui.TextSpan(
-          text: message,
+          text: displayText,
           style: const TextStyle(
-            color: Colors.greenAccent,
-            fontSize: 28,
-            fontWeight: FontWeight.bold,
+            color: Color(0xFF39FF14), 
+            fontSize: 24,
             fontFamily: 'monospace',
+            shadows: [
+              Shadow(
+                blurRadius: 10.0,
+                color: Color(0xFF39FF14),
+                offset: Offset(0, 0),
+              ),
+            ],
           ),
         ),
-        textAlign: TextAlign.center,
+        textAlign: TextAlign.left,
         textDirection: ui.TextDirection.ltr,
-      )..layout(maxWidth: size.width);
+      )..layout(maxWidth: size.width - 40);
 
       messagePainter.paint(
         canvas,
         Offset(
-            (size.width - messagePainter.width) / 2, size.height / 2),
+          (size.width - messagePainter.width) / 2,
+          size.height / 2.2,
+        ),
       );
       messagePainter.dispose();
     }
   }
 
   @override
-  bool shouldRepaint(covariant MatrixPainter old) {
-    return !listEquals(old.streams, streams) ||
-        !listEquals(old.positions, positions) ||
-        old.message != message;
-  }
+  bool shouldRepaint(covariant MatrixPainter oldDelegate) => true;
 }
