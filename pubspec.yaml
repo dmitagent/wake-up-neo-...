@@ -1,6 +1,5 @@
 name: wake_up_neo
-description: Matrix and Nostalgia
-
+description: "A Matrix-style terminal simulation in Flutter."
 publish_to: 'none'
 
 version: 1.0.0+1
@@ -11,11 +10,14 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  just_audio: ^0.9.36 # Наш легкий аудио-плеер
 
 dev_dependencies:
-  flutter:
-    sdk: flutter
   flutter_lints: ^3.0.1
 
 flutter:
   uses-material-design: true
+
+  # ✅ Подключаем папку со звуками, чтобы Flutter видел наш файл
+  assets:
+    - assets/matrix.mp3
