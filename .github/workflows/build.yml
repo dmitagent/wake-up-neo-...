@@ -24,15 +24,16 @@ jobs:
         with:
           channel: 'stable'
 
-      # Этот шаг создаст нужные папки для Web и Android прямо на сервере
+      # Конфигурируем платформы
       - name: Configure Web and Android platforms
         run: flutter create . --platforms web,android
 
       - name: Install dependencies
         run: flutter pub get
 
+      # Собираем Web с флагом html, чтобы избежать любых ошибок рендеринга
       - name: Build Web
-        run: flutter build web --release
+        run: flutter build web --web-renderer html --release
 
       - name: Build Android APK
         run: flutter build apk --release
