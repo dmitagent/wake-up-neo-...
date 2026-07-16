@@ -20,4 +20,4 @@ flutter:
 
   # ✅ Подключаем папку со звуками, чтобы Flutter видел наш файл
   assets:
-    - assets/matrix.mp3
+      - assets/matrix.mp3
