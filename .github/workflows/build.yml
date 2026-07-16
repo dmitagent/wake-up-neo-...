@@ -33,7 +33,7 @@ jobs:
 
       # Чистая сборка Web без лишних флагов
       - name: Build Web
-        run: flutter build web --release
+        run: flutter build web --release --base-href /wake-up-neo-.../
 
       # Сборка Android APK
       - name: Build Android APK
