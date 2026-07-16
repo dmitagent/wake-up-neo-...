@@ -64,7 +64,7 @@ class _MatrixScreenState extends State<MatrixScreen>
   final AudioPlayer _audioPlayer = AudioPlayer();
   bool _isAudioInitialized = false;
 
-  final Map<String, ui.TextPainter> _textPainterCache = {};
+  final Map<String, TextPainter> _textPainterCache = {};
 
   @override
   void initState() {
@@ -192,12 +192,12 @@ class _MatrixScreenState extends State<MatrixScreen>
     });
   }
 
-  ui.TextPainter _getCachedPainter(int charCode, Color color) {
+  TextPainter _getCachedPainter(int charCode, Color color) {
     final char = String.fromCharCode(charCode);
     final key = '$char#${color.value}';
     return _textPainterCache.putIfAbsent(key, () {
       return ui.TextPainter(
-        text: ui.TextSpan(
+        text: TextSpan(
           text: char,
           style: TextStyle(
             color: color,
@@ -251,7 +251,7 @@ class MatrixPainter extends CustomPainter {
   final double fontSize;
   final String message;
   final bool showCursor;
-  final ui.TextPainter Function(int, Color) getCachedPainter;
+  final TextPainter Function(int, Color) getCachedPainter;
 
   const MatrixPainter({
     required this.streams,
@@ -287,8 +287,8 @@ class MatrixPainter extends CustomPainter {
 
     if (message.isNotEmpty) {
       final displayText = showCursor ? '$message█' : message;
-      final messagePainter = ui.TextPainter(
-        text: ui.TextSpan(
+      final messagePainter = TextPainter(
+        text: TextSpan(
           text: displayText,
           style: const TextStyle(
             color: Color(0xFF39FF14), 
