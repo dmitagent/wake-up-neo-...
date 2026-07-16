@@ -80,7 +80,7 @@ class _MatrixScreenState extends State<MatrixScreen>
 
   Future<void> _initAudio() async {
     try {
-      await _audioPlayer.setAsset('assets/typing.mp3');
+      await _audioPlayer.setAsset('assets/matrix.mp3'); # <-- поменяли здесь
       await _audioPlayer.setLoopMode(LoopMode.one);
       _isAudioInitialized = true;
     } catch (e) {
